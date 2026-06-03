@@ -22,7 +22,7 @@ INTERVALLE = 5 * 60
 DOSSIER_PINE = Path.home() / "tradingview" / "pine_scripts"
 
 # Timeframes à analyser en mode MTF (ordre top-down ICT)
-TIMEFRAMES = ["D1", "H4", "H1", "M15"]
+TIMEFRAMES = ["D1", "H4", "H1", "M15", "M5", "M1"]
 
 PROMPT_MTF = """Tu es un expert SMC (Smart Money Concepts) et ICT (Inner Circle Trader).
 Tu reçois {nb} graphiques TradingView du MÊME actif sur différentes unités de temps: {tfs}.
