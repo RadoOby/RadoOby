@@ -112,7 +112,11 @@ def mode_chat() -> None:
         if not question:
             continue
 
-        print("Capture + analyse en cours...")
+        print("Basculez sur TradingView maintenant...")
+        for i in range(5, 0, -1):
+            print(f"  Capture dans {i}s...", end="\r")
+            time.sleep(1)
+        print("Capture!                    ")
         try:
             screenshot = prendre_screenshot()
             img = image_en_base64(screenshot)
