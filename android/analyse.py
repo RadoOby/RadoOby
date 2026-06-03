@@ -107,13 +107,62 @@ def appeler_claude(messages: list, max_tokens: int = 2500) -> str:
     return reponse.json()["content"][0]["text"]
 
 
+def trouver_derniere_image() -> str:
+    """Trouve la dernière image sauvegardée depuis TradingView."""
+    dossiers = [
+        Path("/sdcard/Pictures"),
+        Path("/sdcard/DCIM"),
+        Path("/sdcard/Pictures/TradingView"),
+        Path("/sdcard/Download"),
+    ]
+    derniere = None
+    derniere_mtime = 0
+    for dossier in dossiers:
+        if not dossier.exists():
+            continue
+        for ext in ("*.png", "*.jpg", "*.jpeg"):
+            for f in dossier.glob(ext):
+                if f.stat().st_mtime > derniere_mtime:
+                    derniere_mtime = f.stat().st_mtime
+                    derniere = f
+    if not derniere:
+        raise RuntimeError("Aucune image trouvée. Sauvegardez un graphique TradingView d'abord.")
+    return str(derniere)
+
+
+def attendre_nouvelle_image(timeout: int = 60) -> str:
+    """Attend qu'une nouvelle image apparaisse dans la galerie."""
+    dossiers = [
+        Path("/sdcard/Pictures"),
+        Path("/sdcard/DCIM"),
+        Path("/sdcard/Pictures/TradingView"),
+        Path("/sdcard/Download"),
+    ]
+    # Snapshot des fichiers existants
+    existants = set()
+    for d in dossiers:
+        if d.exists():
+            for ext in ("*.png", "*.jpg", "*.jpeg"):
+                existants.update(str(f) for f in d.glob(ext))
+
+    print(f"En attente d'une nouvelle image ({timeout}s max)...")
+    debut = time.time()
+    while time.time() - debut < timeout:
+        for d in dossiers:
+            if not d.exists():
+                continue
+            for ext in ("*.png", "*.jpg", "*.jpeg"):
+                for f in d.glob(ext):
+                    if str(f) not in existants:
+                        time.sleep(0.5)  # laisser le fichier finir d'écrire
+                        return str(f)
+        time.sleep(1)
+    raise RuntimeError("Timeout: aucune nouvelle image reçue.")
+
+
 def prendre_screenshot(nom: str = "capture") -> str:
-    chemin = str(Path.home() / "tradingview" / f"{nom}.png")
-    Path(chemin).parent.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run(["termux-screenshot", "-f", chemin], capture_output=True, timeout=15)
-    if r.returncode != 0:
-        raise RuntimeError(f"Screenshot échoué: {r.stderr.decode()}")
-    return chemin
+    """Utilise la dernière image sauvegardée depuis TradingView."""
+    return trouver_derniere_image()
 
 
 def image_en_base64(chemin: str) -> str:
@@ -148,14 +197,10 @@ def parler(texte: str) -> None:
 
 
 def capturer_timeframe(tf: str) -> str:
-    """Guide l'utilisateur pour changer de TF et capture le screenshot."""
-    print(f"\n>>> Passez sur TradingView en {tf}")
-    parler(f"Passez sur {tf}")
-    for i in range(8, 0, -1):
-        print(f"  Capture dans {i}s...", end="\r")
-        time.sleep(1)
-    print(f"  Capture {tf}!          ")
-    return prendre_screenshot(f"capture_{tf}")
+    """Demande à l'utilisateur de sauvegarder le graphique TF depuis TradingView."""
+    print(f"\n>>> Dans TradingView, passez sur {tf} puis: Partager → Enregistrer l'image")
+    parler(f"Passez sur {tf} dans TradingView et sauvegardez le graphique.")
+    return attendre_nouvelle_image(timeout=120)
 
 
 def mode_mtf() -> None:
@@ -236,14 +281,10 @@ def mode_chat() -> None:
         if not question:
             continue
 
-        print("Basculez sur TradingView...")
-        for i in range(5, 0, -1):
-            print(f"  Capture dans {i}s...", end="\r")
-            time.sleep(1)
-        print("Capture!              ")
-
+        print("Dans TradingView: Partager → Enregistrer l'image")
+        parler("Sauvegardez le graphique dans TradingView maintenant.")
         try:
-            screenshot = prendre_screenshot()
+            screenshot = attendre_nouvelle_image(timeout=60)
             img = image_en_base64(screenshot)
             reponse = appeler_claude([{
                 "role": "user",
@@ -259,19 +300,20 @@ def mode_chat() -> None:
 
 
 def mode_auto() -> None:
-    """Analyse automatique toutes les 5 minutes en SMC/ICT."""
-    parler("Claude SMC ICT démarré. Analyse automatique toutes les 5 minutes.")
-    print("Ouvrez TradingView sur votre graphique.\n")
-    time.sleep(5)
+    """Analyse automatique: attend une nouvelle image TradingView."""
+    parler("Claude SMC ICT démarré. Sauvegardez vos graphiques TradingView pour les analyser.")
+    print("Dans TradingView: Partager → Enregistrer l'image\n")
+    print("Le script analyse chaque nouvelle image automatiquement.\n")
 
     compteur = 0
     while True:
         compteur += 1
         print(f"\n{'='*40}")
-        print(f"Analyse SMC #{compteur} — {time.strftime('%H:%M:%S')}")
+        print(f"En attente du graphique #{compteur} — {time.strftime('%H:%M:%S')}")
+        print("Sauvegardez un graphique TradingView...")
 
         try:
-            screenshot = prendre_screenshot()
+            screenshot = attendre_nouvelle_image(timeout=INTERVALLE)
             img = image_en_base64(screenshot)
             texte = appeler_claude([{
                 "role": "user",
