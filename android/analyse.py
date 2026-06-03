@@ -18,19 +18,31 @@ MODEL = "claude-sonnet-4-6"
 INTERVALLE = 5 * 60
 DOSSIER_PINE = Path.home() / "tradingview" / "pine_scripts"
 
-PROMPT_AUTO = """Tu es un trader expert. Analyse ce graphique TradingView.
+PROMPT_AUTO = """Tu es un trader expert SMC (Smart Money Concepts) et ICT (Inner Circle Trader). Analyse ce graphique TradingView.
 
-RAPPORT VOCAL (4 phrases max, style radio):
-[tendance, entrée probable, stop-loss, signal ACHAT/VENTE/ATTENDRE]
+Identifie et explique:
+- Market Structure: BOS (Break of Structure) / CHoCH (Change of Character)
+- Order Blocks (OB) baissiers et haussiers visibles
+- Fair Value Gaps (FVG) / Imbalances non comblées
+- Zones de liquidité: BSL (Buy Side) / SSL (Sell Side)
+- Zone Premium ou Discount (position dans le dealing range)
+- OTE (Optimal Trade Entry) via Fibonacci 61.8-79%
+- Kill Zone active (London / New York)
+
+RAPPORT VOCAL (4 phrases max, style radio, en français):
+[tendance SMC, zone d'entrée OB/FVG, SL au-dessus/dessous du dernier swing, signal ACHAT/VENTE/NEUTRE]
 
 ---PINE SCRIPT---
 //@version=5
-[script complet: indicateurs visibles, logique entrée/sortie, SL/TP, alertes]
+[script complet avec: détection OB, FVG, BOS/CHoCH, zones de liquidité, entrée OTE, SL/TP, alertes]
 ---FIN PINE SCRIPT---"""
 
-PROMPT_CHAT = """Tu es un trader expert. L'utilisateur pose une question sur ce graphique TradingView.
-Réponds en 3 phrases maximum, en français, style parlé naturel (sera lu à voix haute).
-Sois direct et précis: tendance, niveaux clés, recommandation."""
+PROMPT_CHAT = """Tu es un trader expert SMC (Smart Money Concepts) et ICT (Inner Circle Trader).
+L'utilisateur pose une question sur ce graphique TradingView.
+
+Analyse en SMC/ICT: Order Blocks, FVG, BOS/CHoCH, liquidité BSL/SSL, zones Premium/Discount, OTE.
+Réponds en 4 phrases maximum, en français, style parlé naturel (sera lu à voix haute).
+Sois direct: structure du marché, zone clé SMC, recommandation d'entrée ICT."""
 
 
 def appeler_claude(messages: list) -> str:
