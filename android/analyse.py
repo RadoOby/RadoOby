@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """
-Claude prend le contrôle de l'analyse TradingView sur Android.
-- Capture l'écran TradingView automatiquement
-- Analyse le graphique (tendance, entrée, SL, TP)
-- Génère le Pine Script correspondant
-- Lit le rapport à voix haute
-- Sauvegarde le Pine Script prêt à copier dans TradingView
+Claude Trading - Analyse TradingView automatique avec rapport vocal.
+Utilise l'API Anthropic directement via requests (sans SDK).
 """
 
 import subprocess
@@ -14,163 +10,134 @@ import os
 import time
 import sys
 from pathlib import Path
-from anthropic import Anthropic
+import requests
 
-client = Anthropic()
-
+API_URL = "https://api.anthropic.com/v1/messages"
+MODEL = "claude-sonnet-4-6"
 INTERVALLE = 5 * 60  # 5 minutes
-DOSSIER_SCRIPTS = Path.home() / "tradingview" / "pine_scripts"
+DOSSIER_PINE = Path.home() / "tradingview" / "pine_scripts"
 
-PROMPT_ANALYSE = """Tu es un trader algorithmique expert. Analyse ce graphique TradingView en détail.
+PROMPT = """Tu es un trader algorithmique expert. Analyse ce graphique TradingView.
 
-Donne exactement ce format:
-
-RAPPORT VOCAL (à lire à voix haute, 4 phrases max, style radio):
-[ton rapport vocal ici]
+RAPPORT VOCAL (4 phrases max, style radio, langage parlé):
+[ton rapport ici: tendance, entrée probable, stop-loss, signal ACHAT/VENTE/ATTENDRE]
 
 ---PINE SCRIPT---
 //@version=5
-[ton script Pine Script complet ici, avec stratégie d'entrée basée sur ce que tu vois sur le graphique]
----FIN PINE SCRIPT---
+[script Pine Script complet avec: indicateurs visibles, logique entrée/sortie, SL/TP, alertes]
+---FIN PINE SCRIPT---"""
 
-Le Pine Script doit inclure:
-- Les indicateurs que tu identifies sur le graphique (RSI, MA, MACD, Bollinger, etc.)
-- La logique d'entrée ACHAT et VENTE basée sur l'analyse
-- Un stop-loss et take-profit calculés
-- Des alertes (alertcondition)
-- Des labels sur le graphique pour les signaux"""
+
+def appeler_claude(image_base64: str) -> str:
+    cle = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not cle:
+        raise ValueError("ANTHROPIC_API_KEY manquante")
+
+    reponse = requests.post(
+        API_URL,
+        headers={
+            "x-api-key": cle,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": MODEL,
+            "max_tokens": 2000,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": image_base64,
+                        },
+                    },
+                    {"type": "text", "text": PROMPT},
+                ],
+            }],
+        },
+        timeout=60,
+    )
+
+    if reponse.status_code != 200:
+        raise RuntimeError(f"Erreur API: {reponse.status_code} - {reponse.text}")
+
+    return reponse.json()["content"][0]["text"]
 
 
 def prendre_screenshot() -> str:
     chemin = str(Path.home() / "tradingview" / "capture.png")
     Path(chemin).parent.mkdir(parents=True, exist_ok=True)
-    resultat = subprocess.run(
-        ["termux-screenshot", "-f", chemin],
-        capture_output=True, text=True, timeout=15
-    )
-    if resultat.returncode != 0:
-        raise RuntimeError(f"Screenshot échoué: {resultat.stderr}")
+    r = subprocess.run(["termux-screenshot", "-f", chemin], capture_output=True, timeout=15)
+    if r.returncode != 0:
+        raise RuntimeError(f"Screenshot échoué: {r.stderr.decode()}")
     return chemin
 
 
-def encoder_image(chemin: str) -> str:
-    with open(chemin, "rb") as f:
-        return base64.standard_b64encode(f.read()).decode("utf-8")
-
-
-def analyser(chemin_image: str) -> dict:
-    image_data = encoder_image(chemin_image)
-    reponse = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": image_data,
-                    },
-                },
-                {"type": "text", "text": PROMPT_ANALYSE},
-            ],
-        }]
-    )
-    texte = reponse.content[0].text
-    return extraire_sections(texte)
-
-
-def extraire_sections(texte: str) -> dict:
-    vocal = ""
-    pine = ""
-
-    # Extraire le rapport vocal
+def extraire_sections(texte: str) -> tuple[str, str]:
+    vocal, pine = texte, ""
     if "RAPPORT VOCAL" in texte:
         debut = texte.find("RAPPORT VOCAL") + len("RAPPORT VOCAL")
-        # Chercher la fin (soit --- soit la fin du texte)
-        fin = texte.find("---PINE SCRIPT---")
-        if fin == -1:
-            fin = len(texte)
+        fin = texte.find("---PINE SCRIPT---") if "---PINE SCRIPT---" in texte else len(texte)
         vocal = texte[debut:fin].strip().lstrip(":").strip()
-
-    # Extraire le Pine Script
     if "---PINE SCRIPT---" in texte and "---FIN PINE SCRIPT---" in texte:
         debut = texte.find("---PINE SCRIPT---") + len("---PINE SCRIPT---")
         fin = texte.find("---FIN PINE SCRIPT---")
         pine = texte[debut:fin].strip()
+    return vocal, pine
 
-    return {"vocal": vocal or texte[:500], "pine": pine}
 
-
-def sauvegarder_pine(pine_script: str, compteur: int) -> str:
-    DOSSIER_SCRIPTS.mkdir(parents=True, exist_ok=True)
-    horodatage = time.strftime("%Y%m%d_%H%M%S")
-    fichier = DOSSIER_SCRIPTS / f"strategie_{horodatage}.pine"
-    fichier.write_text(pine_script, encoding="utf-8")
+def sauvegarder_pine(pine: str) -> str:
+    DOSSIER_PINE.mkdir(parents=True, exist_ok=True)
+    fichier = DOSSIER_PINE / f"strategie_{time.strftime('%Y%m%d_%H%M%S')}.pine"
+    fichier.write_text(pine, encoding="utf-8")
     return str(fichier)
 
 
 def parler(texte: str) -> None:
-    # Nettoyer le texte pour la synthèse vocale (enlever markdown)
-    texte_propre = texte.replace("*", "").replace("#", "").replace("`", "")
-    subprocess.run(["termux-tts-speak", "-l", "fr", texte_propre], timeout=60)
+    propre = texte.replace("*", "").replace("#", "").replace("`", "").replace("-", "")
+    subprocess.run(["termux-tts-speak", "-l", "fr", propre[:500]], timeout=60)
 
 
-def afficher_separateur(titre: str) -> None:
-    print(f"\n{'='*50}")
-    print(f"  {titre}")
-    print('='*50)
+def main() -> None:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ERREUR: clé API manquante.")
+        print("Tapez: export ANTHROPIC_API_KEY='votre_cle'")
+        sys.exit(1)
 
-
-def boucle_principale() -> None:
-    parler("Claude Trading démarré. Je surveille TradingView.")
-    print("\nOuvrez TradingView sur votre graphique.")
-    print("Je l'analyserai toutes les 5 minutes.\n")
+    parler("Claude Trading démarré. Surveillance toutes les 5 minutes.")
+    print("Ouvrez TradingView sur votre graphique. Analyse dans 5 secondes...\n")
+    time.sleep(5)
 
     compteur = 0
     while True:
         compteur += 1
-        horodatage = time.strftime("%H:%M:%S")
-
-        afficher_separateur(f"Analyse #{compteur} — {horodatage}")
-        print("Capture de l'écran TradingView...")
+        print(f"\n{'='*40}")
+        print(f"Analyse #{compteur} — {time.strftime('%H:%M:%S')}")
+        print("Capture TradingView...")
 
         try:
             screenshot = prendre_screenshot()
-            print("Envoi à Claude pour analyse...")
-            resultat = analyser(screenshot)
+            print("Envoi à Claude...")
+            texte = appeler_claude(base64.standard_b64encode(open(screenshot, "rb").read()).decode())
+            vocal, pine = extraire_sections(texte)
 
-            # Afficher et lire le rapport vocal
-            afficher_separateur("RAPPORT")
-            print(resultat["vocal"])
-            parler(resultat["vocal"])
+            print(f"\nRAPPORT:\n{vocal}")
+            parler(vocal)
 
-            # Sauvegarder et afficher le Pine Script
-            if resultat["pine"]:
-                fichier = sauvegarder_pine(resultat["pine"], compteur)
-                afficher_separateur("PINE SCRIPT GÉNÉRÉ")
-                print(resultat["pine"])
-                print(f"\nSauvegardé: {fichier}")
-                parler("Pine Script généré et sauvegardé. Copiez-le dans l'éditeur TradingView.")
+            if pine:
+                fichier = sauvegarder_pine(pine)
+                print(f"\nPine Script sauvegardé: {fichier}")
+                parler("Pine Script généré. Copiez-le dans TradingView.")
 
-        except FileNotFoundError:
-            msg = "Erreur: installez le package termux-api dans Termux."
-            print(msg)
-            parler(msg)
-            sys.exit(1)
         except Exception as e:
-            erreur = f"Erreur analyse: {str(e)}"
-            print(erreur)
+            print(f"Erreur: {e}")
 
         print(f"\nProchaine analyse dans 5 minutes...")
         time.sleep(INTERVALLE)
 
 
 if __name__ == "__main__":
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("ERREUR: clé API manquante.")
-        print("Commande: export ANTHROPIC_API_KEY='votre_cle'")
-        sys.exit(1)
-    boucle_principale()
+    main()
